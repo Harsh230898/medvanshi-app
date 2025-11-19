@@ -27,7 +27,6 @@ export const AIChatProvider = ({ children }) => {
     return false;
   });
   
-  // --- NEW: Clear Chat Function ---
   const clearChat = () => {
     setAiMessages([INITIAL_MESSAGE]);
     notificationContext?.addNotification("Chat session cleared.", "info");
@@ -39,7 +38,6 @@ export const AIChatProvider = ({ children }) => {
       return;
     }
     const deckName = `🤖 AI: ${topic.substring(0, 30).trim()} - ${new Date().toLocaleDateString()}`;
-    
     const newDeck = {
         name: deckName,
         cards: flashcards.length,
@@ -50,13 +48,12 @@ export const AIChatProvider = ({ children }) => {
         keywords: topic.toLowerCase(),
         content: flashcards.map((card, index) => ({
             id: index,
-            question: card.cue || "No Question",
-            answer: card.answer || "No Answer",
+            question: card.cue || "Question",
+            answer: card.answer || "Answer",
             highYieldNote: card.highYieldNote || "",
             tags: (Array.isArray(card.tags) ? card.tags : []).join(', '),
         }))
     };
-
     flashcardContext?.addDeck(newDeck);
     notificationContext?.addNotification(`Deck "${deckName}" saved with ${flashcards.length} cards!`, 'success');
   };
@@ -71,15 +68,12 @@ export const AIChatProvider = ({ children }) => {
       const flashcards = data.flashcards;
       if (!flashcards || flashcards.length === 0) throw new Error("No flashcards generated.");
       const topic = userPrompt.replace(/flashcard(s)?|create|high-yield on|generate/gi, '').trim() || "Generated Topic";
-      
       const previewContent = `
-**✅ Generated ${flashcards.length} High-Yield Flashcards** on **${topic}**.
-
-**Card 1:** ${flashcards[0].cue}
-**Card 2:** ${flashcards[1].cue}
-...
-Click below to save this deck.`;
-
+          **✅ Generated ${flashcards.length} High-Yield Flashcards** on **${topic}**.
+          **Card 1:** ${flashcards[0].cue}
+          **Card 2:** ${flashcards[1].cue}
+          ...
+          Click below to save this deck.`;
       setAiMessages(prev => [...prev, {
           sender: 'ai',
           content: previewContent,
@@ -88,8 +82,6 @@ Click below to save this deck.`;
           topic: topic
       }]);
     } catch (e) {
-      console.error("AI Format Error:", e);
-      notificationContext?.addNotification("AI returned an invalid format. Please try again.", 'error');
       handleAITextResponse("I had trouble formatting the flashcards. Could you try asking again?");
     }
   };
@@ -110,27 +102,19 @@ Click below to save this deck.`;
       let aiResponseContent;
       
       if (intent === 'flashcard') {
-        const flashcardSystemPrompt = `
-          You are an expert NEET PG tutor. 
-          Generate exactly 10 high-yield flashcards based on the user's topic. 
-          Format MUST be a valid JSON object with this structure:
-          {
-            "flashcards": [
-              { "cue": "Question?", "answer": "Answer", "highYieldNote": "Extra info", "tags": ["tag1", "tag2"] }
-            ]
-          }
-        `;
-        aiResponseContent = await getGroqCompletion(flashcardSystemPrompt, userInput, true);
+        const flashcardSystemPrompt = `You are an expert NEET PG tutor. Generate exactly 10 high-yield flashcards based on the user's topic. Format MUST be a valid JSON object: { "flashcards": [ { "cue": "...", "answer": "...", "highYieldNote": "...", "tags": ["..."] } ] }`;
+        // Use 8b-instant for speed/cost efficiency
+        aiResponseContent = await getGroqCompletion(flashcardSystemPrompt, userInput, true, 'llama-3.1-8b-instant');
         handleAIFlashcardResponse(aiResponseContent, userInput);
       } else {
-        const doubtSolverSystemPrompt = `You are a concise NEET PG medical tutor. Answer the user's question using markdown. Bold key terms.`;
-        aiResponseContent = await getGroqCompletion(doubtSolverSystemPrompt, userInput, false);
+        const doubtSolverSystemPrompt = `You are a concise NEET PG medical tutor. Answer using markdown. Bold key terms.`;
+        // Use 8b-instant for chat
+        aiResponseContent = await getGroqCompletion(doubtSolverSystemPrompt, userInput, false, 'llama-3.1-8b-instant');
         handleAITextResponse(aiResponseContent);
       }
     } catch (error) {
-      console.error(error);
-      notificationContext?.addNotification("AI assistant failed to respond. Check connection.", 'error');
-      handleAITextResponse("Sorry, I encountered an internal error. Please try again.");
+      notificationContext?.addNotification("AI assistant failed to respond.", 'error');
+      handleAITextResponse("Sorry, connection error.");
     } finally {
       setAiLoading(false);
       uiContext?.setIsGlobalLoading(false);
@@ -140,7 +124,7 @@ Click below to save this deck.`;
   return (
     <AIChatContext.Provider value={{ 
       aiMessages, aiLoading, aiIntroShown, setAiIntroShown, 
-      handleUserSubmit, saveAIFlashcards, clearChat // <-- Exported here
+      handleUserSubmit, saveAIFlashcards, clearChat 
     }}>
       {children}
     </AIChatContext.Provider>

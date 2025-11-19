@@ -23,9 +23,9 @@ import {
   signOut
 } from 'firebase/auth';
 
-// ==========================================
-// 1. AUTHENTICATION & USER PROFILE
-// ==========================================
+// ======================
+// 1. AUTH & USER PROFILE
+// ======================
 
 export const apiLogin = (email, password) => {
   return signInWithEmailAndPassword(auth, email, password);
@@ -37,7 +37,7 @@ export const apiSignUp = async (email, password) => {
   const userDocRef = doc(db, 'users', user.uid);
   const displayName = email.split('@')[0].split('.').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
 
-  // Initialize comprehensive user profile
+  // Initialize User Profile
   await setDoc(userDocRef, {
     uid: user.uid,
     email: user.email,
@@ -49,8 +49,9 @@ export const apiSignUp = async (email, password) => {
     totalQuestions: 0,
     studyTimeMinutes: 0,
     rank: 0,
-    weeklyGoal: 200, // Default goal
-    bookmarks: []
+    totalUsers: 0,
+    bookmarks: [],
+    weeklyGoal: 200 // Default Weekly Goal
   });
 
   return userCredential;
@@ -90,9 +91,9 @@ export const updateUserProgress = async (uid, updates) => {
   await updateDoc(userDocRef, updates);
 };
 
-// ==========================================
-// 2. GAMIFICATION (Phase 2)
-// ==========================================
+// ======================
+// 2. GAMIFICATION
+// ======================
 
 export const updateStreak = async (uid) => {
   try {
@@ -105,7 +106,6 @@ export const updateStreak = async (uid) => {
     const lastLoginDate = userData.lastLoginDate;
     const today = new Date().toDateString();
 
-    // Already logged in today
     if (lastLoginDate === today) {
       return userData.streak || 1;
     }
@@ -116,7 +116,6 @@ export const updateStreak = async (uid) => {
 
     let newStreak = 1;
 
-    // If logged in yesterday, increment; otherwise reset
     if (lastLoginDate === yesterdayString) {
       newStreak = (userData.streak || 0) + 1;
     }
@@ -136,7 +135,7 @@ export const updateStreak = async (uid) => {
 export const getMCQOfTheDay = async () => {
   try {
     const qCol = collection(db, 'questions');
-    // Fetch a small batch to randomize
+    // Fetch a small random batch to pick from
     const q = query(qCol, limit(10)); 
     const snapshot = await getDocs(q);
     
@@ -167,9 +166,9 @@ export const getLeaderboard = async (sortBy = 'testsCompleted') => {
   }
 };
 
-// ==========================================
-// 3. FLASHCARDS CRUD (Phase 3)
-// ==========================================
+// ======================
+// 3. FLASHCARDS CRUD
+// ======================
 
 export const getUserDecks = async (uid) => {
   try {
@@ -213,9 +212,9 @@ export const deleteUserDeck = async (uid, deckId) => {
   }
 };
 
-// ==========================================
+// ======================
 // 4. METADATA & SUBJECTS
-// ==========================================
+// ======================
 
 export const getSubjects = async (sources = []) => {
   const allSubjects = [];
@@ -243,12 +242,11 @@ export const getSubjects = async (sources = []) => {
   return allSubjects;
 };
 
-// ==========================================
-// 5. ANALYTICS & ADAPTIVE ENGINE (Phase 5)
-// ==========================================
+// ======================
+// 5. ANALYTICS, PREDICTIVE & ADAPTIVE ENGINE
+// ======================
 
 export const getPeerBenchmarks = async () => {
-  // Mocked aggregate data for predictive analysis
   return {
     'All Sources': { predictedScore: '1000 - 1100', highImpactTopics: ['Neuro', 'GI', 'CVS'], overallAccuracy: 85 },
     'Marrow': { predictedScore: '1050 - 1150', highImpactTopics: ['Neuro', 'GI', 'Obgyn'], overallAccuracy: 90 },
@@ -270,7 +268,6 @@ export const getAdaptiveTestStrategy = async (uid) => {
       total: subjectStats[sub].total
     }));
 
-    // Find weaknesses: Low accuracy (<70%) with meaningful attempts (>=5)
     const weaknesses = subjects
       .filter(s => s.total >= 5 && s.accuracy < 70)
       .sort((a, b) => a.accuracy - b.accuracy)
@@ -296,85 +293,6 @@ export const getAdaptiveTestStrategy = async (uid) => {
   }
 };
 
-export const getDetailedAnalytics = async (uid) => {
-  try {
-    const historyRef = collection(db, 'users', uid, 'test_history');
-    const snapshot = await getDocs(historyRef);
-    const history = snapshot.docs.map(d => d.data());
-
-    const sourceStats = {};
-    const subjectStats = {};
-    const cognitiveStats = {};
-    const timeStats = {};
-    let weeklyQs = 0;
-
-    // Calculate start of current week
-    const now = new Date();
-    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
-    startOfWeek.setHours(0,0,0,0);
-
-    history.forEach(test => {
-      // 0. Weekly Progress
-      if (new Date(test.timestamp) > startOfWeek) {
-        weeklyQs += (test.totalScore / 4 || 0);
-      }
-
-      // 1. Source Breakdown
-      let source = 'Unknown';
-      const title = (test.testTitle || '').toLowerCase();
-      const rawSource = (test.source || '').toLowerCase();
-      
-      if (rawSource.includes('marrow') || title.includes('marrow')) source = 'Marrow';
-      else if (rawSource.includes('prep') || title.includes('prep')) source = 'Prepladder';
-      else if (rawSource.includes('cerebellum') || title.includes('cerebellum')) source = 'Cerebellum';
-      else if (rawSource.includes('dams') || title.includes('epw')) source = 'EPWDAMS';
-
-      if (!sourceStats[source]) sourceStats[source] = { correct: 0, total: 0 };
-      sourceStats[source].correct += (test.correct || 0);
-      sourceStats[source].total += (test.totalScore / 4 || 0); 
-
-      // 2. Subject Stats
-      if (test.subjectBreakdown) {
-        Object.entries(test.subjectBreakdown).forEach(([sub, stats]) => {
-           if (!subjectStats[sub]) subjectStats[sub] = { correct: 0, total: 0, time: 0, count: 0 };
-           subjectStats[sub].correct += stats.correct;
-           subjectStats[sub].total += stats.total;
-           
-           // 3. Time Management Aggregation
-           if (test.avgTimePerQ) {
-               subjectStats[sub].time += test.avgTimePerQ;
-               subjectStats[sub].count += 1;
-           }
-        });
-      }
-
-      // 4. Cognitive Stats
-      if (test.cognitiveBreakdown) {
-        Object.entries(test.cognitiveBreakdown).forEach(([skill, stats]) => {
-           const cleanSkill = skill || 'Recall';
-           if (!cognitiveStats[cleanSkill]) cognitiveStats[cleanSkill] = { correct: 0, total: 0 };
-           cognitiveStats[cleanSkill].correct += stats.correct;
-           cognitiveStats[cleanSkill].total += stats.total;
-        });
-      }
-    });
-    
-    // Helper to attach calculated time averages to subject stats output
-    Object.keys(subjectStats).forEach(sub => {
-        if (subjectStats[sub].count > 0) {
-            subjectStats[sub].avgTime = Math.round(subjectStats[sub].time / subjectStats[sub].count);
-        } else {
-            subjectStats[sub].avgTime = 0;
-        }
-    });
-
-    return { sourceStats, subjectStats, cognitiveStats, timeStats, history, weeklyQs };
-  } catch (error) {
-    console.error("Error calculating analytics:", error);
-    return null;
-  }
-};
-
 export const getTopicStats = async (uid, subjectName) => {
   try {
     const historyRef = collection(db, 'users', uid, 'test_history');
@@ -389,13 +307,85 @@ export const getTopicStats = async (uid, subjectName) => {
       }
     });
     const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
-    // Get approximate total available Qs
     const qRef = collection(db, 'questions');
     const qQuery = query(qRef, where('subject', '==', subjectName));
     const qSnap = await getDocs(qQuery);
     return { userAccuracy: accuracy, totalQuestionsAvailable: qSnap.size, questionsAttempted: total };
   } catch (error) {
     return { userAccuracy: 0, totalQuestionsAvailable: 0, questionsAttempted: 0 };
+  }
+};
+
+export const getDetailedAnalytics = async (uid) => {
+  try {
+    const historyRef = collection(db, 'users', uid, 'test_history');
+    const snapshot = await getDocs(historyRef);
+    const history = snapshot.docs.map(d => d.data());
+
+    const sourceStats = {};
+    const subjectStats = {};
+    const cognitiveStats = {};
+    const timeStats = {};
+    let weeklyQs = 0;
+
+    const now = new Date();
+    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+    startOfWeek.setHours(0,0,0,0);
+
+    history.forEach(test => {
+      if (new Date(test.timestamp) > startOfWeek) {
+        weeklyQs += (test.totalScore / 4 || 0);
+      }
+
+      let source = 'Unknown';
+      const title = (test.testTitle || '').toLowerCase();
+      const rawSource = (test.source || '').toLowerCase();
+      
+      if (rawSource.includes('marrow') || title.includes('marrow')) source = 'Marrow';
+      else if (rawSource.includes('prep') || title.includes('prep')) source = 'Prepladder';
+      else if (rawSource.includes('cerebellum') || title.includes('cerebellum')) source = 'Cerebellum';
+      else if (rawSource.includes('dams') || title.includes('epw')) source = 'EPWDAMS';
+
+      if (!sourceStats[source]) sourceStats[source] = { correct: 0, total: 0 };
+      sourceStats[source].correct += (test.correct || 0);
+      sourceStats[source].total += (test.totalScore / 4 || 0); 
+
+      if (test.subjectBreakdown) {
+        Object.entries(test.subjectBreakdown).forEach(([sub, stats]) => {
+           if (!subjectStats[sub]) subjectStats[sub] = { correct: 0, total: 0, time: 0, count: 0 };
+           subjectStats[sub].correct += stats.correct;
+           subjectStats[sub].total += stats.total;
+           
+           if (test.timeTaken && test.totalScore) {
+              const qCount = test.totalScore / 4;
+              const timePerQ = test.timeTaken / qCount;
+              subjectStats[sub].time += (stats.total * timePerQ);
+           }
+        });
+      }
+
+      if (test.cognitiveBreakdown) {
+        Object.entries(test.cognitiveBreakdown).forEach(([skill, stats]) => {
+           const cleanSkill = skill || 'Recall';
+           if (!cognitiveStats[cleanSkill]) cognitiveStats[cleanSkill] = { correct: 0, total: 0 };
+           cognitiveStats[cleanSkill].correct += stats.correct;
+           cognitiveStats[cleanSkill].total += stats.total;
+        });
+      }
+    });
+    
+    Object.keys(subjectStats).forEach(sub => {
+        if (subjectStats[sub].count > 0) {
+            subjectStats[sub].totalTimePerQ = Math.round(subjectStats[sub].time / subjectStats[sub].count);
+        } else {
+            subjectStats[sub].totalTimePerQ = 0;
+        }
+    });
+
+    return { sourceStats, subjectStats, cognitiveStats, timeStats: subjectStats, history, weeklyQs };
+  } catch (error) {
+    console.error("Error calculating analytics:", error);
+    return null;
   }
 };
 
@@ -419,12 +409,7 @@ export const saveGrandTestResult = async (uid, resultData) => {
     const historyRef = collection(db, 'users', uid, 'test_history');
     await addDoc(historyRef, { ...resultData, timestamp: new Date().toISOString(), type: 'grand_test' });
     const userRef = doc(db, 'users', uid);
-    
-    // Update global stats
-    const timeSpentMinutes = resultData.timeTaken 
-        ? Math.round(resultData.timeTaken / 60) 
-        : Math.round(resultData.totalScore / 4); 
-
+    const timeSpentMinutes = resultData.timeTaken ? Math.round(resultData.timeTaken / 60) : Math.round(resultData.totalScore / 4); 
     await updateDoc(userRef, { 
         testsCompleted: increment(1),
         totalQuestions: increment(resultData.totalScore / 4),
@@ -471,7 +456,7 @@ export const submitPublicMnemonic = async (mnemonicData) => {
 };
 
 // ======================
-// 8. CLINICAL SIMULATIONS & AI (Phase 4)
+// 8. CLINICAL SIMULATIONS & AI
 // ======================
 
 export const getClinicalCases = async () => {
@@ -528,26 +513,19 @@ export const generateAICase = async (topic) => {
 };
 
 // ======================
-// 9. SEARCH & STUDY PLANNER (Phase 6)
+// 9. SEMANTIC SEARCH & STUDY PLANNER
 // ======================
 
 export const generateStudyPlan = async (uid, examDate, dailyHours) => {
   try {
     const strategy = await getAdaptiveTestStrategy(uid);
     const weakAreas = strategy.focusSubjects ? strategy.focusSubjects.join(", ") : "General Revision";
-
     const today = new Date();
     const exam = new Date(examDate);
     const daysLeft = Math.ceil((exam - today) / (1000 * 60 * 60 * 24));
-
     if (daysLeft <= 0) return { error: "Exam date must be in the future." };
 
-    const systemPrompt = `
-      You are an expert NEET PG Study Planner.
-      Create a ${daysLeft}-day study schedule (max 7 days detailed, summarize rest if longer).
-      Student Profile: Weak Areas: ${weakAreas} (Prioritize these!). Daily Study Time: ${dailyHours} hours.
-      Output Format: JSON Array of objects. Example: { "plan": [ { "day": 1, "date": "Day 1", "focus": "Subject", "tasks": ["Task 1"] } ], "summary": "Brief summary." }
-    `;
+    const systemPrompt = `Create a ${daysLeft}-day study schedule. Weak Areas: ${weakAreas}. Daily Time: ${dailyHours} hours. JSON: { "plan": [ { "day": 1, "date": "Day 1", "focus": "Subject", "tasks": ["Task 1"] } ], "summary": "Brief summary." }`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -656,27 +634,23 @@ export const getQuestionsByIds = async (ids = []) => {
   if (!ids || ids.length === 0) return [];
   const uniqueIds = [...new Set(ids)];
   try {
-    // Stage 1: Exact Match
     const promises = uniqueIds.map(id => getDoc(doc(db, 'questions', id)));
     const snapshots = await Promise.all(promises);
     let foundQuestions = snapshots.map(formatDoc).filter(q => q !== null);
     const missingCount = uniqueIds.length - foundQuestions.length;
 
-    // Stage 2: Smart Recovery (Substring)
     if (missingCount > uniqueIds.length * 0.1) {
       const allQQuery = query(collection(db, 'questions'), limit(2000)); 
       const allQSnap = await getDocs(allQQuery);
-      const allDBQuestions = allQSnap.docs.map(d => ({ ...formatDoc(d), realId: d.id }));
+      const allDBQuestions = allQSnap.docs.map(formatDoc).filter(q => q !== null);
       const foundIds = new Set(foundQuestions.map(q => q.id));
       const missingIds = uniqueIds.filter(id => !foundIds.has(id));
-
       missingIds.forEach(missingId => {
-        const match = allDBQuestions.find(q => q.realId?.includes(missingId) || missingId.includes(q.realId));
+        const match = allDBQuestions.find(q => q.id?.includes(missingId) || missingId.includes(q.id));
         if (match && !foundIds.has(match.id)) { foundQuestions.push(match); foundIds.add(match.id); }
       });
     }
 
-    // Stage 3: Emergency Fallback (Source Random)
     if (foundQuestions.length < uniqueIds.length / 2) {
       let targetSource = 'Cerebellum';
       const firstId = (uniqueIds[0] || '').toLowerCase();
@@ -684,7 +658,6 @@ export const getQuestionsByIds = async (ids = []) => {
       else if (firstId.includes('prepladder')) targetSource = 'Prepladder';
       else if (firstId.includes('epwdams') || firstId.includes('dams')) targetSource = 'Epwdams';
       else if (firstId.includes('cerebellum')) targetSource = 'Cerebellum';
-      
       const fallbackQuery = query(collection(db, 'questions'), where('q_source', '==', targetSource), limit(uniqueIds.length));
       const fallbackSnap = await getDocs(fallbackQuery);
       const fallbackQuestions = fallbackSnap.docs.map(formatDoc).filter(q => q !== null);
@@ -711,7 +684,8 @@ export const removeBookmark = async (uid, questionId) => {
   await updateDoc(userDocRef, { bookmarks: arrayRemove(questionId) });
 };
 
-export const getGroqCompletion = async (systemPrompt, userPrompt, schema = null) => {
+// CENTRAL AI FUNCTION (Supports Model Selection)
+export const getGroqCompletion = async (systemPrompt, userPrompt, schema = null, model = 'llama-3.3-70b-versatile') => {
   try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -720,7 +694,7 @@ export const getGroqCompletion = async (systemPrompt, userPrompt, schema = null)
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: model, 
         messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt } ],
         temperature: 0.7,
         max_tokens: 2048,

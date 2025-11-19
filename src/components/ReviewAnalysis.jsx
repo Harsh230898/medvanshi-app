@@ -31,6 +31,7 @@ const ReviewAnalysis = ({ question, userIncorrect = true }) => {
         Correct Answer: "${question.options[question.answer - 1]}"
         Explanation: "${question.explanation}"
 
+        Task:
         1. Identify the ROOT GAP (The single concept I likely misunderstood).
         2. Provide a GAP BRIDGE (One high-yield fact to fix this).
         3. STUDY RECOMMENDATION: Tell me exactly what Topic/Module to read in **${sourceContext}** to fix this.
@@ -79,7 +80,7 @@ const ReviewAnalysis = ({ question, userIncorrect = true }) => {
   if (isLoading) return (
     <div className={`mt-6 p-6 rounded-2xl border ${CardStyle.bg} ${CardStyle.border} animate-pulse`}>
         <h3 className="text-lg font-bold mb-3 flex items-center gap-2 text-purple-600 dark:text-purple-400">
-            <Brain className="w-5 h-5 animate-spin" /> Generating Clinical Correlations...
+            <Brain className="w-5 h-5 animate-spin" /> Generating Study Plan...
         </h3>
         <div className="h-2 bg-slate-200 rounded w-3/4 mb-2"></div>
         <div className="h-2 bg-slate-200 rounded w-1/2"></div>
@@ -96,7 +97,7 @@ const ReviewAnalysis = ({ question, userIncorrect = true }) => {
         <div className="flex items-center gap-3">
             <div className="p-2 bg-rose-100 dark:bg-rose-900/50 rounded-lg"><Activity className="w-6 h-6 text-rose-600 dark:text-rose-400" /></div>
             <div>
-            <h3 className="text-xl font-black text-slate-900 dark:text-white">Clinical Correlation</h3>
+            <h3 className="text-xl font-black text-slate-900 dark:text-white">Smart Review</h3>
             <p className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Source: {question.source || 'General'}</p>
             </div>
         </div>
