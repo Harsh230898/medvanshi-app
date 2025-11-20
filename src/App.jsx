@@ -2,6 +2,7 @@
 import React, { useContext, useState, useMemo, useEffect } from 'react';
 import { Heart } from 'lucide-react';
 
+// --- Import Contexts ---
 import AuthContext from './context/AuthContext';
 import UIContext from './context/UIContext';
 import QuizContext from './context/QuizContext';
@@ -10,12 +11,14 @@ import UGCContext from './context/UGCContext';
 import MetadataContext from './context/MetadataContext';
 import { smartSearchQuestions } from './services/firestoreService';
 
+// --- Import Reusable Components ---
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import MainHeader from './components/MainHeader';
 import SplashScreen from './components/SplashScreen';
 import NotificationHub from './components/NotificationHub';
 
+// --- Import All View (Page) Components ---
 import AuthView from './views/AuthView';
 import HomeView from './views/HomeView';
 import QBankView from './views/QBankView';
@@ -47,6 +50,7 @@ const App = () => {
   const { communityMnemonics } = useContext(UGCContext);
   const { allSubjects, metadataLoading } = useContext(MetadataContext);
 
+  // --- SPLASH SCREEN TIMER ---
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!metadataLoading) {
@@ -56,11 +60,12 @@ const App = () => {
     return () => clearTimeout(timer);
   }, [metadataLoading, setIsAppLoading]);
 
+  // --- FULL SCREEN VIEW CONFIGURATION ---
+  // FIX: Removed 'patient-encounters' so Top Bar stays visible
   const isFullScreenView = isQuizActive || 
                            currentView === 'quiz' || 
                            currentView === 'results' || 
                            currentView === 'ai-chat' || 
-                           currentView === 'patient-encounters' || 
                            currentView === 'flashcard-study';
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,7 +85,7 @@ const App = () => {
     const topics = allSubjects.filter(s => 
       s.name.toLowerCase().includes(query) || 
       (s.aiSummary && s.aiSummary.toLowerCase().includes(query))
-    ).map(s => ({ id: s.name, title: `${s.name} Deep Dive Hub`, snippet: 'Topic Analysis', icon: s.icon, type: 'Deep Dive Topic' }));
+    ).map(s => ({ id: s.name, title: `${s.name} Deep Dive Hub`, snippet: 'Topic Analysis & Stats', icon: s.icon, type: 'Deep Dive Topic' }));
     
     const flashcards = flashcardDecks.filter(d => 
       d.name.toLowerCase().includes(query) || (d.keywords && d.keywords.toLowerCase().includes(query))
@@ -157,18 +162,18 @@ const App = () => {
             </div>
 
             <div className="flex-1 flex flex-col h-screen overflow-hidden">
+              {/* TopBar is now visible on patient encounters because isFullScreenView is false for it */}
               {!isFullScreenView && <TopBar />}
 
               <div className="flex-1 overflow-auto custom-scrollbar flex flex-col">
-                {/* RESPONSIVE PADDING FIX: p-4 on mobile, p-6 on tablet, p-10 on desktop */}
-                <div className={`p-4 md:p-6 lg:p-10 ${isFullScreenView ? 'hidden' : ''}`}>
+                <div className={`p-6 lg:p-10 ${isFullScreenView ? 'hidden' : ''}`}>
                   <MainHeader 
                     searchQuery={searchQuery} 
                     setSearchQuery={setSearchQuery} 
                     performSearch={performSearch} 
                   />
                 </div>
-                <div className={`flex-1 ${isFullScreenView ? 'h-full' : 'p-4 md:p-6 lg:p-10 pt-0'}`}>
+                <div className={`flex-1 ${isFullScreenView ? 'h-full' : 'p-6 lg:p-10 pt-0'}`}>
                   {renderView()}
                 </div>
                 
