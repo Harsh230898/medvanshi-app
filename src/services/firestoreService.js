@@ -15,7 +15,8 @@ import {
   increment,
   arrayUnion,
   arrayRemove,
-  deleteDoc
+  deleteDoc,
+  writeBatch // Ensure writeBatch is imported
 } from 'firebase/firestore';
 import {
   signInWithEmailAndPassword,
@@ -469,9 +470,28 @@ export const getClinicalCases = async () => {
   }
 };
 
+// --- EXPORTED FUNCTION FOR CLEARING CASES ---
+export const clearAllClinicalCases = async () => {
+  try {
+    const casesRef = collection(db, 'clinical_cases');
+    const snapshot = await getDocs(casesRef);
+    
+    // Use writeBatch to delete efficiently
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
+    await batch.commit();
+    return true;
+  } catch (error) {
+    console.error("Error clearing cases:", error);
+    return false;
+  }
+};
+
 export const seedClinicalCase = async () => {
   try {
-    // CORRECTED SEQUENTIAL INDEXING (0 -> 1 -> 2 for success)
     const caseData = {
       title: 'Acute Chest Pain in 55-Year-Old Male',
       source: 'Marrow Clinicals',
@@ -485,20 +505,20 @@ export const seedClinicalCase = async () => {
           prompt: "Patient is sweating, anxious. BP 160/95, HR 102. History of HTN.<br/><br/>**Immediate action?**", 
           action: 'Choose Management', 
           options: [ 
-            { label: 'Nitroglycerin & Aspirin (Correct)', nextStep: 1 }, // Go to Index 1
-            { label: 'CT Pulmonary Angio (Wrong)', nextStep: 3 }, // Go to Index 3 (Branch)
-            { label: 'Antacids (Wrong)', nextStep: 4 } // Go to Index 4
+            { label: 'Nitroglycerin & Aspirin', nextStep: 1 }, // Correct (A)
+            { label: 'CT Pulmonary Angio', nextStep: 3 }, // Wrong
+            { label: 'Antacids', nextStep: 4 } // Wrong
           ] 
         },
-        // Index 1: Correct Path Step 2
+        // Index 1: Correct Path Step 2 (Shuffled)
         { 
           title: 'ECG Findings', 
           prompt: "Pain persists mildy. <br/>**ECG shows ST elevation in II, III, aVF.** <br/><br/>Diagnosis?", 
           action: 'Diagnose', 
           options: [ 
-            { label: 'Inferior Wall MI (Correct)', nextStep: 2 }, // Go to Index 2
-            { label: 'Anterior Wall MI (Wrong)', nextStep: 4 }, 
-            { label: 'Pericarditis (Wrong)', nextStep: 4 } 
+            { label: 'Anterior Wall MI', nextStep: 4 }, // Wrong
+            { label: 'Inferior Wall MI', nextStep: 2 }, // Correct (B)
+            { label: 'Pericarditis', nextStep: 4 } // Wrong
           ] 
         },
         // Index 2: Correct Path Step 3
@@ -507,8 +527,8 @@ export const seedClinicalCase = async () => {
           prompt: "Correct. Inferior Wall MI. <br/><br/>**Definitive management?**", 
           action: 'Select Treatment', 
           options: [ 
-            { label: 'Thrombolysis / PCI (Correct)', nextStep: 100 }, // Success
-            { label: 'Observation (Wrong)', nextStep: 99 } // Fail
+            { label: 'Thrombolysis / PCI', nextStep: 100 }, // Success
+            { label: 'Observation', nextStep: 99 } // Fail
           ] 
         },
         // Index 3: Wrong Path A
@@ -534,7 +554,6 @@ export const seedClinicalCase = async () => {
 
 export const generateAICase = async (topic) => {
   try {
-    // UPDATED PROMPT: Strict JSON keys to ensure "prompt" is always present
     const systemPrompt = `You are a medical educator. Create a clinical case on "${topic}". 
     Output VALID JSON. Structure:
     {
@@ -544,18 +563,18 @@ export const generateAICase = async (topic) => {
       "description": "Brief summary", 
       "steps": [
         {
-          "title": "Step Title (e.g. Initial Presentation)",
-          "prompt": "HTML formatted scenario text. Describe patient vitals, symptoms, etc.",
-          "action": "Short label for decision button (e.g. Choose Diagnosis)",
+          "title": "Step Title",
+          "prompt": "Scenario details...",
+          "action": "Decision label",
           "options": [ { "label": "Option A", "nextStep": 1 } ]
         }
       ]
     }
     
     CRITICAL RULES:
-    1. Every step MUST have a "prompt" field. Do NOT use "description" or "text".
-    2. The correct path MUST be sequential indices: Index 0 -> Index 1 -> Index 2 -> 100.
-    3. Use "nextStep": 99 for failure, 100 for success.`;
+    1. Correct path must use sequential indices: 0 -> 1 -> 2 -> 100.
+    2. Failures use "nextStep": 99.
+    3. DO NOT include "(Correct)" or "(Wrong)" in the label.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -570,11 +589,9 @@ export const generateAICase = async (topic) => {
     const data = await response.json();
     let parsedData = JSON.parse(data.choices[0].message.content);
 
-    // DATA SANITIZATION: Ensure every step has a 'prompt'
     if(parsedData.steps && Array.isArray(parsedData.steps)){
         parsedData.steps = parsedData.steps.map(step => ({
             ...step,
-            // Fallback: If AI put prompt in 'description' or 'text', use that.
             prompt: step.prompt || step.description || step.text || "Scenario details missing.",
             action: step.action || "Make Decision"
         }));

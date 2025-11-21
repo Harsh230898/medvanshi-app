@@ -1,9 +1,9 @@
 // src/views/PatientEncountersView.jsx
-import React, { useContext, useState, useEffect } from 'react';
-import { UserCheck, Maximize2, Layers, Loader2, Play, ArrowLeft, Brain, Sparkles, AlertTriangle, CheckCircle, XCircle, Home } from 'lucide-react';
+import React, { useContext, useState, useEffect, useMemo } from 'react';
+import { UserCheck, Maximize2, Layers, Loader2, Play, ArrowLeft, Brain, Sparkles, AlertTriangle, CheckCircle, XCircle, Home, Trash2 } from 'lucide-react';
 import UIContext from '../context/UIContext';
 import PatientEncounterContext from '../context/PatientEncounterContext';
-import { seedClinicalCase } from '../services/firestoreService';
+import { seedClinicalCase, clearAllClinicalCases } from '../services/firestoreService';
 
 const PatientEncountersView = () => {
   const { getTextColor, getCardStyle, isDarkMode } = useContext(UIContext);
@@ -19,8 +19,34 @@ const PatientEncountersView = () => {
   
   const [customTopic, setCustomTopic] = useState('');
   const [isSeeding, setIsSeeding] = useState(false);
+  const [interactionLocked, setInteractionLocked] = useState(false);
 
   const QUICK_TOPICS = ["Myocardial Infarction", "Stroke", "DKA", "Trauma", "Pneumonia"];
+
+  // --- HOOKS MUST BE AT THE TOP LEVEL ---
+  
+  // 1. Interaction Lock Effect
+  useEffect(() => {
+    setInteractionLocked(true);
+    const timer = setTimeout(() => {
+      setInteractionLocked(false);
+    }, 800); 
+    return () => clearTimeout(timer);
+  }, [currentStep, activeCase]);
+
+  // 2. Safe Step Data Calculation (Calculated early for useMemo)
+  const stepData = activeCase && activeCase.steps 
+    ? (activeCase.steps[currentStep] || activeCase.steps[0]) 
+    : null;
+
+  // 3. Memoized Shuffle (Moved UP before any return statements)
+  const shuffledOptions = useMemo(() => {
+    if (!stepData || !stepData.options) return [];
+    // Create a shallow copy and sort randomly
+    return [...stepData.options].sort(() => Math.random() - 0.5);
+  }, [stepData]); // Re-run only when stepData changes
+
+  // --- HANDLERS ---
 
   const handleGenerateAI = async (topic) => {
     if (!topic) return;
@@ -43,7 +69,20 @@ const PatientEncountersView = () => {
     setIsSeeding(false);
   };
 
-  // --- 1. OUTCOME REPORT (Replaces the Alert) ---
+  const handleResetLibrary = async () => {
+    if (confirm("Are you sure? This will delete ALL saved cases to fix corrupted data.")) {
+      setIsSeeding(true);
+      await clearAllClinicalCases();
+      await seedClinicalCase(); 
+      await refreshCases();
+      alert("Library reset and repaired.");
+      setIsSeeding(false);
+    }
+  };
+
+  // --- CONDITIONAL RENDERING STARTS HERE ---
+
+  // 1. OUTCOME REPORT
   if (encounterOutcome) {
     const isSuccess = encounterOutcome === 'success';
     return (
@@ -88,17 +127,26 @@ const PatientEncountersView = () => {
 
   const isValidCase = activeCase && activeCase.steps && Array.isArray(activeCase.steps) && activeCase.steps.length > 0;
   
-  // --- 2. DASHBOARD VIEW ---
+  // 2. DASHBOARD VIEW
   if (!activeCase || !isValidCase) {
     return (
       <div className="max-w-7xl mx-auto">
-        <div className="mb-10">
-          <h2 className={`text-4xl lg:text-6xl font-black mb-3 ${getTextColor('text-slate-900', 'text-white')}`}>
-            Virtual Patient Encounters
-          </h2>
-          <p className={getTextColor('text-xl text-slate-600', 'text-slate-400')}>
-            High-fidelity clinical case simulations.
-          </p>
+        <div className="mb-10 flex justify-between items-end">
+          <div>
+            <h2 className={`text-4xl lg:text-6xl font-black mb-3 ${getTextColor('text-slate-900', 'text-white')}`}>
+                Virtual Patient Encounters
+            </h2>
+            <p className={getTextColor('text-xl text-slate-600', 'text-slate-400')}>
+                High-fidelity clinical case simulations.
+            </p>
+          </div>
+          <button 
+            onClick={handleResetLibrary} 
+            className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg"
+            title="Fix corrupted cases"
+          >
+            <Trash2 className="w-4 h-4" /> Reset Library
+          </button>
         </div>
 
         {/* AI Generator */}
@@ -184,9 +232,7 @@ const PatientEncountersView = () => {
     );
   }
   
-  // --- 3. ACTIVE ENCOUNTER VIEW ---
-  const stepData = activeCase.steps[currentStep] || activeCase.steps[0];
-
+  // 3. ACTIVE ENCOUNTER VIEW (Missing Data Fallback)
   if (!stepData) {
      return (
         <div className="h-full flex flex-col items-center justify-center p-10 text-center">
@@ -228,10 +274,26 @@ const PatientEncountersView = () => {
             <h4 className="text-lg font-black mb-4 flex items-center gap-2 text-slate-700 dark:text-white">
               <Maximize2 className="w-5 h-5 text-rose-500"/> {stepData.action}
             </h4>
-            <div className="grid grid-cols-1 gap-3">
-              {stepData.options && stepData.options.map((option, index) => (
-                <button key={index} onClick={() => handleCaseAction(option.label, option.nextStep)} className={`w-full text-left p-5 rounded-xl border-2 font-bold text-lg transition-all group ${isDarkMode ? 'bg-slate-800 border-slate-600 hover:bg-slate-700 hover:border-purple-500 text-white' : 'bg-white border-slate-200 hover:bg-purple-50 hover:border-purple-400 text-slate-900'}`}>
-                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 text-sm mr-4 group-hover:bg-purple-500 group-hover:text-white">{String.fromCharCode(65+index)}</span>
+            
+            {/* Added key={currentStep} to force re-render of buttons on step change */}
+            <div className="grid grid-cols-1 gap-3" key={currentStep}>
+              {shuffledOptions.map((option, index) => (
+                <button 
+                  key={index} 
+                  onClick={() => !interactionLocked && handleCaseAction(option.label, option.nextStep)} 
+                  disabled={interactionLocked}
+                  className={`w-full text-left p-5 rounded-xl border-2 font-bold text-lg transition-all group 
+                    ${interactionLocked 
+                        ? 'opacity-50 cursor-wait bg-slate-100 border-slate-200 text-slate-400' 
+                        : isDarkMode 
+                            ? 'bg-slate-800 border-slate-600 hover:bg-slate-700 hover:border-purple-500 text-white' 
+                            : 'bg-white border-slate-200 hover:bg-purple-50 hover:border-purple-400 text-slate-900'
+                    }`}
+                >
+                  <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm mr-4 
+                     ${interactionLocked ? 'bg-slate-200 text-slate-500' : 'bg-slate-200 dark:bg-slate-700 group-hover:bg-purple-500 group-hover:text-white'}`}>
+                     {String.fromCharCode(65+index)}
+                  </span>
                   {option.label}
                 </button>
               ))}
