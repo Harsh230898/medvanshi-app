@@ -41,24 +41,59 @@ const HomeView = () => {
 
   // --- DATA FETCHING ---
   useEffect(() => {
-    if (user?.uid) {
-        getDetailedAnalytics(user.uid).then(data => {
+    const loadDailyMCQ = async () => {
+        setMcqLoading(true);
+        const today = new Date().toDateString(); 
+        
+        let cachedMCQ = null;
+        let cachedDate = null;
+
+        if (typeof window !== 'undefined') {
+            cachedMCQ = localStorage.getItem('daily_mcq_data');
+            cachedDate = localStorage.getItem('daily_mcq_date');
+        }
+
+        if (cachedMCQ && cachedDate === today) {
+            // Use cached version
+            setMcqOfDay(JSON.parse(cachedMCQ));
+            setMcqLoading(false);
+        } else {
+            // Fetch new one
+            try {
+                const q = await getMCQOfTheDay();
+                if (q) {
+                    setMcqOfDay(q);
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('daily_mcq_data', JSON.stringify(q));
+                        localStorage.setItem('daily_mcq_date', today);
+                        // Reset answer state for new day
+                        localStorage.removeItem('daily_mcq_answered');
+                    }
+                }
+            } catch (e) {
+                console.error("Error loading MCQ", e);
+            }
+            setMcqLoading(false);
+        }
+    };
+
+    const loadAnalytics = async () => {
+        if (!user?.uid) return;
+        try {
+            const data = await getDetailedAnalytics(user.uid);
             if (data) {
                 setWeeklyProgress(data.weeklyQs || 0);
                 
-                // Calculate Strengths/Weaknesses
                 const subjects = Object.entries(data.subjectStats).map(([k, v]) => ({
                     subject: k, 
                     accuracy: v.total > 0 ? Math.round((v.correct/v.total)*100) : 0,
                     questionsAttempted: v.total
-                })).sort((a, b) => b.accuracy - a.accuracy); // High to Low
+                })).sort((a, b) => b.accuracy - a.accuracy); 
 
                 const strengths = subjects.filter(s => s.accuracy >= 70).slice(0, 1);
-                const weaknesses = subjects.filter(s => s.accuracy < 70).reverse().slice(0, 1); // Low to High
+                const weaknesses = subjects.filter(s => s.accuracy < 70).reverse().slice(0, 1); 
                 
-                if (weaknesses.length > 0) {
-                    setWeakestSubject(weaknesses[0].subject);
-                }
+                if (weaknesses.length > 0) setWeakestSubject(weaknesses[0].subject);
 
                 setPerformanceData(prev => ({
                     ...prev,
@@ -71,31 +106,46 @@ const HomeView = () => {
                     }
                 }));
             }
-        });
+        } catch (e) {
+            console.error("Analytics error", e);
+        }
+    };
 
-        // Fetch MCQ
-        setMcqLoading(true);
-        getMCQOfTheDay().then(q => {
-            if (q) setMcqOfDay(q);
-            setMcqLoading(false);
-        });
+    if (user?.uid) {
+        loadDailyMCQ();
+        loadAnalytics();
     }
   }, [user]);
 
+  // RESTORE ANSWER STATE
+  useEffect(() => {
+    if (typeof window !== 'undefined' && mcqOfDay) {
+        const savedAnswer = localStorage.getItem('daily_mcq_answered');
+        if (savedAnswer) {
+            const parsed = JSON.parse(savedAnswer);
+            setSelectedOption(parsed.index);
+            setMcqAnswered(true);
+            setIsCorrect(parsed.correct);
+        }
+    }
+  }, [mcqOfDay]);
+
   const handleGoalUpdate = async () => {
-     await updateUserGoal(user.uid, parseInt(goalInput));
+     if(user?.uid) await updateUserGoal(user.uid, parseInt(goalInput));
   };
 
   const handleMcqSubmit = (index) => {
     if (mcqAnswered) return;
     setSelectedOption(index);
     setMcqAnswered(true);
-    if (index === (mcqOfDay.answer - 1)) {
-      setIsCorrect(true);
+    const correct = index === (mcqOfDay.answer - 1);
+    setIsCorrect(correct);
+    if (typeof window !== 'undefined') {
+        localStorage.setItem('daily_mcq_answered', JSON.stringify({ index, correct }));
     }
   };
 
-  // Placeholder Achievements Logic
+  // Placeholder Achievements
   const ACHIEVEMENTS = [
     { name: 'Streak Starter', description: 'Maintain a 7-day study streak.', icon: Flame, isAchieved: (user?.streak || 0) >= 7, color: 'text-orange-500' },
     { name: 'Marrow Master', description: 'Attempt 1000 questions from Marrow.', icon: Dribbble, isAchieved: false, color: 'text-blue-500' },
@@ -103,39 +153,15 @@ const HomeView = () => {
     { name: 'Grand Test Runner', description: 'Complete 3 full Grand Tests.', icon: Trophy, isAchieved: true, color: 'text-yellow-500' },
   ];
 
-  // --- SUB-COMPONENTS ---
-
   const McqCard = () => {
-    if (mcqLoading) {
-      return (
-        <div className="rounded-3xl p-8 text-white shadow-2xl bg-gradient-to-br from-pink-500 via-rose-500 to-orange-500 flex items-center justify-center h-full min-h-[320px]">
-           <Loader2 className="w-10 h-10 animate-spin" />
-        </div>
-      );
-    }
-
-    if (!mcqOfDay) {
-      return (
-        <div className="rounded-3xl p-8 text-white shadow-2xl bg-gradient-to-br from-pink-500 via-rose-500 to-orange-500 h-full min-h-[320px] flex flex-col justify-center items-center text-center">
-           <Brain className="w-16 h-16 mb-4 text-white/80" />
-           <h3 className="text-3xl font-bold mb-2">All Caught Up!</h3>
-           <p>Check back tomorrow for a new daily challenge.</p>
-        </div>
-      );
-    }
-
+    if (mcqLoading) return <div className="rounded-3xl p-8 text-white shadow-2xl bg-gradient-to-br from-pink-500 via-rose-500 to-orange-500 flex items-center justify-center h-full min-h-[320px]"><Loader2 className="w-10 h-10 animate-spin" /></div>;
+    if (!mcqOfDay) return <div className="rounded-3xl p-8 text-white shadow-2xl bg-gradient-to-br from-pink-500 via-rose-500 to-orange-500 h-full min-h-[320px] flex flex-col justify-center items-center text-center"><Brain className="w-16 h-16 mb-4 text-white/80" /><h3 className="text-3xl font-bold mb-2">All Caught Up!</h3><p>Check back tomorrow for a new daily challenge.</p></div>;
     return (
       <div className="relative overflow-hidden rounded-3xl p-8 lg:p-10 text-white shadow-2xl bg-gradient-to-br from-pink-500 via-rose-500 to-orange-500 h-full flex flex-col justify-center">
         <div className="relative z-10">
-           <div className="flex justify-between items-start mb-4">
-              <span className="text-[10px] font-black bg-white/20 px-2 py-1 rounded uppercase tracking-wider backdrop-blur-sm">MCQ OF THE DAY</span>
-              <span className="text-xs font-bold opacity-80 bg-black/20 px-2 py-1 rounded">{mcqOfDay.source || 'General'}</span>
-           </div>
-           
-           <h3 className="text-xl lg:text-2xl font-bold mb-6 leading-snug">
-             {mcqOfDay.question}
-           </h3>
-           
+           {/* REMOVED THE SOURCE SPAN */}
+           <div className="flex justify-between items-start mb-4"><span className="text-[10px] font-black bg-white/20 px-2 py-1 rounded uppercase tracking-wider backdrop-blur-sm">MCQ OF THE DAY</span></div>
+           <h3 className="text-xl lg:text-2xl font-bold mb-6 leading-snug">{mcqOfDay.question}</h3>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
              {mcqOfDay.options.map((opt, idx) => {
                 let btnClass = "bg-white/10 hover:bg-white/20 border-white/20 text-white";
@@ -144,27 +170,10 @@ const HomeView = () => {
                   else if (idx === selectedOption) btnClass = "bg-red-500 border-red-400 text-white opacity-80";
                   else btnClass = "bg-white/10 opacity-50";
                 }
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => handleMcqSubmit(idx)}
-                    disabled={mcqAnswered}
-                    className={`text-left p-4 rounded-xl border-2 transition-all font-semibold text-sm ${btnClass}`}
-                  >
-                    <span className="inline-block w-6 opacity-70">{String.fromCharCode(65+idx)}.</span> {opt}
-                  </button>
-                );
+                return <button key={idx} onClick={() => handleMcqSubmit(idx)} disabled={mcqAnswered} className={`text-left p-4 rounded-xl border-2 transition-all font-semibold text-sm ${btnClass}`}><span className="inline-block w-6 opacity-70">{String.fromCharCode(65+idx)}.</span> {opt}</button>;
              })}
            </div>
-           {mcqAnswered && (
-             <div className="mt-6 p-4 bg-black/20 rounded-xl backdrop-blur-md animate-fade-in border border-white/10">
-               <div className="flex items-center gap-2 font-bold mb-2">
-                 {isCorrect ? <CheckCircle className="text-green-300 w-5 h-5"/> : <AlertCircle className="text-red-200 w-5 h-5"/>}
-                 {isCorrect ? "Correct Answer!" : "Incorrect"}
-               </div>
-               <p className="text-sm opacity-90 leading-relaxed">{mcqOfDay.explanation}</p>
-             </div>
-           )}
+           {mcqAnswered && <div className="mt-6 p-4 bg-black/20 rounded-xl backdrop-blur-md animate-fade-in border border-white/10"><div className="flex items-center gap-2 font-bold mb-2">{isCorrect ? <CheckCircle className="text-green-300 w-5 h-5"/> : <AlertCircle className="text-red-200 w-5 h-5"/>}{isCorrect ? "Correct Answer!" : "Incorrect"}</div><p className="text-sm opacity-90 leading-relaxed">{mcqOfDay.explanation}</p></div>}
         </div>
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
       </div>
@@ -174,32 +183,12 @@ const HomeView = () => {
   const HomeRecommendations = () => (
     <div className={`rounded-3xl p-8 border ${CardStyle.bg} ${CardStyle.border} bg-gradient-to-r from-purple-50 to-pink-50 dark:from-slate-800 dark:to-purple-900/30 border-purple-400 dark:border-purple-700 flex flex-col justify-between h-full`}>
       <div>
-        <div className="flex items-center gap-4 mb-4">
-          <Brain className="w-10 h-10 text-pink-600" />
-          <h3 className={`text-2xl font-black ${getTextColor('text-slate-900', 'text-white')}`}>Smart Recommendations</h3>
-        </div>
-        <p className={getTextColor('text-sm font-semibold mb-6 text-slate-600', 'text-slate-400')}>
-          Your adaptive study plan for maximum impact:
-        </p>
-        
-        <div className="p-4 rounded-xl bg-purple-200/50 dark:bg-purple-800/50 border border-purple-300 dark:border-purple-700 mb-4">
-          <p className="text-xs font-bold text-purple-800 dark:text-purple-300 uppercase mb-1">Focus Topic</p>
-          <p className="text-lg font-black text-purple-900 dark:text-white">{performanceData.recommendations.focusTopic}</p>
-        </div>
-        
-        <div className="p-4 rounded-xl bg-red-200/50 dark:bg-red-800/50 border border-red-300 dark:border-red-700 mb-4">
-          <p className="text-xs font-bold text-red-800 dark:text-red-300 uppercase mb-1">Why?</p>
-          <p className="text-sm font-medium text-red-900 dark:text-red-100 leading-snug">{performanceData.recommendations.reason}</p>
-        </div>
+        <div className="flex items-center gap-4 mb-4"><Brain className="w-10 h-10 text-pink-600" /><h3 className={`text-2xl font-black ${getTextColor('text-slate-900', 'text-white')}`}>Smart Recommendations</h3></div>
+        <p className={getTextColor('text-sm font-semibold mb-6 text-slate-600', 'text-slate-400')}>Your adaptive study plan for maximum impact:</p>
+        <div className="p-4 rounded-xl bg-purple-200/50 dark:bg-purple-800/50 border border-purple-300 dark:border-purple-700 mb-4"><p className="text-xs font-bold text-purple-800 dark:text-purple-300 uppercase mb-1">Focus Topic</p><p className="text-lg font-black text-purple-900 dark:text-white">{performanceData.recommendations.focusTopic}</p></div>
+        <div className="p-4 rounded-xl bg-red-200/50 dark:bg-red-800/50 border border-red-300 dark:border-red-700 mb-4"><p className="text-xs font-bold text-red-800 dark:text-red-300 uppercase mb-1">Why?</p><p className="text-sm font-medium text-red-900 dark:text-red-100 leading-snug">{performanceData.recommendations.reason}</p></div>
       </div>
-      
-      <button 
-        onClick={() => setCurrentView('qbank')}
-        className="w-full py-3 bg-gradient-to-r from-purple-600 to-rose-600 text-white rounded-xl font-bold hover:scale-[1.01] transition-all shadow-lg flex items-center justify-center gap-2"
-      >
-        <span>Practice Topic</span>
-        <ChevronRight className="w-4 h-4" />
-      </button>
+      <button onClick={() => setCurrentView('qbank')} className="w-full py-3 bg-gradient-to-r from-purple-600 to-rose-600 text-white rounded-xl font-bold hover:scale-[1.01] transition-all shadow-lg flex items-center justify-center gap-2"><span>Practice Topic</span><ChevronRight className="w-4 h-4" /></button>
     </div>
   );
 
@@ -209,12 +198,7 @@ const HomeView = () => {
       const percent = goal > 0 ? Math.min(100, Math.round((achieved / goal) * 100)) : 0;
       return (
         <div className={`${CardStyle.bg} ${CardStyle.border} rounded-3xl p-8 border h-full flex flex-col justify-center`}>
-          <div className="flex items-center justify-between mb-6 border-b pb-4">
-            <h3 className={`text-2xl font-black ${getTextColor('text-slate-900', 'text-white')} flex items-center gap-3`}>
-              <CheckSquare className="w-6 h-6 text-teal-500" /> Weekly Goal
-            </h3>
-            <div className="flex items-center gap-2"><input type="number" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} onBlur={handleGoalUpdate} className="w-16 p-1 text-right font-bold bg-transparent border-b border-slate-300 focus:outline-none focus:border-teal-500"/><span className="text-xs font-bold text-purple-600 cursor-pointer" onClick={handleGoalUpdate}>Save</span></div>
-          </div>
+          <div className="flex items-center justify-between mb-6 border-b pb-4"><h3 className={`text-2xl font-black ${getTextColor('text-slate-900', 'text-white')} flex items-center gap-3`}><CheckSquare className="w-6 h-6 text-teal-500" /> Weekly Goal</h3><div className="flex items-center gap-2"><input type="number" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} onBlur={handleGoalUpdate} className="w-16 p-1 text-right font-bold bg-transparent border-b border-slate-300 focus:outline-none focus:border-teal-500"/><span className="text-xs font-bold text-purple-600 cursor-pointer" onClick={handleGoalUpdate}>Save</span></div></div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div><p className="text-4xl font-black text-teal-500">{goal}</p><p className={getTextColor('text-sm font-semibold text-slate-600', 'text-slate-400')}>Target Qs</p></div>
             <div><p className="text-4xl font-black text-purple-500">{achieved}</p><p className={getTextColor('text-sm font-semibold text-slate-600', 'text-slate-400')}>Achieved</p></div>
@@ -231,7 +215,6 @@ const HomeView = () => {
     const minutes = totalMinutes % 60;
     const weeklyGoal = 600; 
     const progressPercent = Math.min(100, (totalMinutes / weeklyGoal) * 100).toFixed(1);
-    
     return (
       <div className={`${CardStyle.bg} ${CardStyle.border} rounded-3xl p-8 border h-full flex flex-col justify-center`}>
         <h3 className={`text-2xl font-black ${getTextColor('text-slate-900', 'text-white')} flex items-center gap-3 mb-6 border-b pb-4`}><Clock className="w-6 h-6 text-indigo-500" /> Study Consistency</h3>
@@ -243,59 +226,33 @@ const HomeView = () => {
 
   const HomePerformanceSummaryDetail = () => (
     <div className={`${CardStyle.bg} ${CardStyle.border} rounded-3xl p-8 border h-full`}>
-      <h3 className={`text-2xl font-black mb-6 ${getTextColor('text-slate-900', 'text-white')} flex items-center gap-3 border-b pb-4`}>
-        <TrendingUp className="w-6 h-6 text-emerald-500" />
-        <TrendingDown className="w-6 h-6 text-rose-500" />
-        Subject Performance Summary
-      </h3>
+      <h3 className={`text-2xl font-black mb-6 ${getTextColor('text-slate-900', 'text-white')} flex items-center gap-3 border-b pb-4`}><TrendingUp className="w-6 h-6 text-emerald-500" /><TrendingDown className="w-6 h-6 text-rose-500" /> Subject Performance Summary</h3>
       <div className="space-y-6">
         {performanceData.strengths.slice(0, 1).map((item, i) => (
           <div key={`s-${i}`} className={`p-6 rounded-2xl border-2 transition-colors ${isDarkMode ? 'bg-slate-700 border-emerald-800' : 'bg-emerald-50 border-emerald-300'}`}>
             <p className="text-sm font-bold text-emerald-600 dark:text-emerald-300 uppercase mb-2">Top Strength</p>
-            <div className="flex items-center justify-between">
-              <span className={`font-black text-2xl ${getTextColor('text-slate-900', 'text-white')}`}>{item.subject}</span>
-              <span className="text-3xl font-black text-emerald-500">{item.accuracy}%</span>
-            </div>
+            <div className="flex items-center justify-between"><span className={`font-black text-2xl ${getTextColor('text-slate-900', 'text-white')}`}>{item.subject}</span><span className="text-3xl font-black text-emerald-500">{item.accuracy}%</span></div>
           </div>
         ))}
         {performanceData.weaknesses.length > 0 ? performanceData.weaknesses.slice(0, 1).map((item, i) => (
           <div key={`w-${i}`} className={`p-6 rounded-2xl border-2 transition-colors ${isDarkMode ? 'bg-slate-700 border-rose-800' : 'bg-rose-50 border-rose-300'}`}>
             <p className="text-sm font-bold text-rose-600 dark:text-rose-300 uppercase mb-2">Biggest Weakness</p>
-            <div className="flex items-center justify-between">
-              <span className={`font-black text-2xl ${getTextColor('text-slate-900', 'text-white')}`}>{item.subject}</span>
-              <span className="text-3xl font-black text-rose-500">{item.accuracy}%</span>
-            </div>
+            <div className="flex items-center justify-between"><span className={`font-black text-2xl ${getTextColor('text-slate-900', 'text-white')}`}>{item.subject}</span><span className="text-3xl font-black text-rose-500">{item.accuracy}%</span></div>
           </div>
-        )) : (
-           <div className="p-8 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-center">
-               <p className="text-slate-500 italic">Take more tests to identify weaknesses.</p>
-           </div>
-        )}
+        )) : <div className="p-8 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-center"><p className="text-slate-500 italic">Take more tests to identify weaknesses.</p></div>}
       </div>
-      <button 
-        onClick={() => setCurrentView('analytics')}
-        className="w-full mt-8 py-4 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 rounded-xl font-bold hover:bg-purple-200 dark:hover:bg-purple-800 transition-all shadow-md text-sm uppercase tracking-wider"
-      >
-        Go to Full Analytics
-      </button>
+      <button onClick={() => setCurrentView('analytics')} className="w-full mt-8 py-4 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 rounded-xl font-bold hover:bg-purple-200 dark:hover:bg-purple-800 transition-all shadow-md text-sm uppercase tracking-wider">Go to Full Analytics</button>
     </div>
   );
 
   const HomeAchievements = () => (
     <div className={`${CardStyle.bg} ${CardStyle.border} rounded-3xl p-8 border h-full`}>
-      <h3 className={getTextColor('text-2xl font-black mb-6', 'text-white') + ' flex items-center gap-3 border-b pb-4'}>
-        <Award className="w-6 h-6 text-green-500" /> Achievements
-      </h3>
+      <h3 className={getTextColor('text-2xl font-black mb-6', 'text-white') + ' flex items-center gap-3 border-b pb-4'}><Award className="w-6 h-6 text-green-500" /> Achievements</h3>
       <div className="space-y-4">
         {ACHIEVEMENTS.map((ach, i) => (
           <div key={i} className={`p-4 rounded-2xl flex items-center gap-4 transition-colors ${ach.isAchieved ? 'bg-emerald-50 dark:bg-emerald-900/40 border border-emerald-300' : 'bg-slate-50 dark:bg-slate-700 border border-slate-300'}`}>
-            <div className={`p-3 rounded-full ${ach.isAchieved ? 'bg-emerald-500' : 'bg-slate-400'}`}>
-              <ach.icon className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <p className={`font-bold ${ach.isAchieved ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-300'}`}>{ach.name}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{ach.description}</p>
-            </div>
+            <div className={`p-3 rounded-full ${ach.isAchieved ? 'bg-emerald-500' : 'bg-slate-400'}`}><ach.icon className="w-5 h-5 text-white" /></div>
+            <div><p className={`font-bold ${ach.isAchieved ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-slate-300'}`}>{ach.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{ach.description}</p></div>
             {ach.isAchieved && <CheckCircle className="w-6 h-6 text-emerald-500 ml-auto" />}
           </div>
         ))}
@@ -306,65 +263,16 @@ const HomeView = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       <div className="mb-10">
-        <h2 className={`text-3xl md:text-5xl lg:text-6xl font-black mb-3 ${getTextColor('text-slate-900', 'text-white')}`}>
-          Welcome back, <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">{user?.displayName || 'Doc'}</span>!
-        </h2>
+        <h2 className={`text-3xl md:text-5xl lg:text-6xl font-black mb-3 ${getTextColor('text-slate-900', 'text-white')}`}>Welcome back, <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">{user?.displayName || 'Doc'}</span>!</h2>
         <p className={getTextColor('text-xl text-slate-600', 'text-slate-400')}>Here's your personalized study dashboard</p>
       </div>
-      
-      {savedQuizSession && (
-        <div className={`p-6 rounded-3xl border border-rose-500 dark:border-rose-700 bg-rose-50/70 dark:bg-rose-900/40 shadow-xl flex justify-between items-center transition-all hover:scale-[1.01]`}>
-          <div className="flex items-center gap-4">
-            <Clock className="w-8 h-8 text-rose-600" />
-            <div>
-              <h3 className="text-xl font-black text-rose-800 dark:text-rose-300">Resume Incomplete Test</h3>
-              <p className="text-sm text-rose-700 dark:text-rose-400">
-                {savedQuizSession.quizQuestions.length} Questions | Time Left: {formatTime(savedQuizSession.timeLeftSeconds)}
-              </p>
-            </div>
-          </div>
-          <button onClick={resumeQuiz} className="bg-rose-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-rose-700 transition-all shadow-md flex items-center gap-2"><Play className="w-5 h-5" /> Resume</button>
-        </div>
-      )}
-
-      {/* ROW 1: MCQ (2/3) + Recommendations (1/3) */}
+      {savedQuizSession && <div className={`p-6 rounded-3xl border border-rose-500 dark:border-rose-700 bg-rose-50/70 dark:bg-rose-900/40 shadow-xl flex justify-between items-center transition-all hover:scale-[1.01]`}><div className="flex items-center gap-4"><Clock className="w-8 h-8 text-rose-600" /><div><h3 className="text-xl font-black text-rose-800 dark:text-rose-300">Resume Incomplete Test</h3><p className="text-sm text-rose-700 dark:text-rose-400">{savedQuizSession.quizQuestions.length} Questions | Time Left: {formatTime(savedQuizSession.timeLeftSeconds)}</p></div></div><button onClick={resumeQuiz} className="bg-rose-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-rose-700 transition-all shadow-md flex items-center gap-2"><Play className="w-5 h-5" /> Resume</button></div>}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6"><div className="lg:col-span-2"><McqCard /></div><div className="lg:col-span-1"><HomeRecommendations /></div></div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6"><div className="lg:col-span-2"><HomeGoalSetting /></div><div className="lg:col-span-1"><HomeStudyTimeTracker /></div></div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2"><McqCard /></div>
-        <div className="lg:col-span-1"><HomeRecommendations /></div>
-      </div>
-
-      {/* ROW 2: Weekly Goal (2/3) + Study Consistency (1/3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2"><HomeGoalSetting /></div>
-        <div className="lg:col-span-1"><HomeStudyTimeTracker /></div>
-      </div>
-      
-      {/* ROW 3: Left: Subject Performance (1/3), Right: Stats + Achievements (2/3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1">
-            <HomePerformanceSummaryDetail />
-        </div>
-        
+        <div className="lg:col-span-1"><HomePerformanceSummaryDetail /></div>
         <div className="lg:col-span-2 flex flex-col gap-6">
-            {/* 4 Stats Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                { icon: Target, label: 'Tests', value: user?.testsCompleted || 0, color: 'from-blue-300 to-cyan-300' },
-                { icon: Award, label: 'Accuracy', value: (user?.overallAccuracy || 0) + '%', color: 'from-emerald-300 to-teal-300' },
-                { icon: Flame, label: 'Streak', value: (user?.streak || 0) + ' days', color: 'from-orange-300 to-rose-300' },
-                { icon: FileText, label: 'MCQs', value: user?.totalQuestions || 0, color: 'from-purple-300 to-pink-300' }
-                ].map((stat, i) => (
-                <div key={i} className={`${CardStyle.bg} ${CardStyle.border} rounded-3xl p-6 hover:shadow-xl transition-all border flex flex-col justify-center`}>
-                    <div className={`p-3 bg-gradient-to-br ${stat.color} rounded-2xl shadow-lg mb-4 inline-block w-12 h-12 flex items-center justify-center`}>
-                    <stat.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <h3 className={getTextColor('text-xs font-bold text-slate-600', 'text-slate-400') + ' mb-1'}>{stat.label}</h3>
-                    <p className={getTextColor('text-3xl font-black text-slate-900', 'text-white')}>{stat.value}</p>
-                </div>
-                ))}
-            </div>
-            
-            {/* Achievements Card */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">{[{ icon: Target, label: 'Tests', value: user?.testsCompleted || 0, color: 'from-blue-300 to-cyan-300' }, { icon: Award, label: 'Accuracy', value: (user?.overallAccuracy || 0) + '%', color: 'from-emerald-300 to-teal-300' }, { icon: Flame, label: 'Streak', value: (user?.streak || 0) + ' days', color: 'from-orange-300 to-rose-300' }, { icon: FileText, label: 'MCQs', value: user?.totalQuestions || 0, color: 'from-purple-300 to-pink-300' }].map((stat, i) => (<div key={i} className={`${CardStyle.bg} ${CardStyle.border} rounded-3xl p-6 hover:shadow-xl transition-all border flex flex-col justify-center`}><div className={`p-3 bg-gradient-to-br ${stat.color} rounded-2xl shadow-lg mb-4 inline-block w-12 h-12 flex items-center justify-center`}><stat.icon className="w-6 h-6 text-white" /></div><h3 className={getTextColor('text-xs font-bold text-slate-600', 'text-slate-400') + ' mb-1'}>{stat.label}</h3><p className={getTextColor('text-3xl font-black text-slate-900', 'text-white')}>{stat.value}</p></div>))}</div>
             <HomeAchievements />
         </div>
       </div>

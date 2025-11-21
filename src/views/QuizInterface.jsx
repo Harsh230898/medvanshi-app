@@ -3,19 +3,19 @@ import React, { useState, useContext, useEffect } from 'react';
 import { Clock, ChevronRight, Star, Bookmark, X, CheckCircle, BookOpen, AlertTriangle } from 'lucide-react';
 import QuizContext from '../context/QuizContext';
 import UIContext from '../context/UIContext';
-import ReviewAnalysis from '../components/ReviewAnalysis'; // Ensure this is imported
+import ReviewAnalysis from '../components/ReviewAnalysis'; 
 import ResultsView from './ResultsView';
 import { auth } from '../services/firebase';
 import { addBookmark, removeBookmark, getMistakeNotebook } from '../services/firestoreService';
 
 const QuizInterface = () => {
   const {
-    isQuizActive, quizQuestions, currentQuestionIndex, setCurrentQuestionIndex,
+    isQuizActive, setIsQuizActive, quizQuestions, currentQuestionIndex, setCurrentQuestionIndex,
     answers, setAnswers, markings, setMarkings, timeLeftSeconds,
     submitQuiz, pauseQuizAndSave, formatTime, quizOptions
   } = useContext(QuizContext);
 
-  const { getBackgroundColor, getCardStyle, isDarkMode, currentView } = useContext(UIContext);
+  const { getBackgroundColor, getCardStyle, isDarkMode, currentView, setCurrentView } = useContext(UIContext);
   const [bookmarkedQuestions, setBookmarkedQuestions] = useState([]);
 
   const isStrictTiming = quizOptions?.strictTiming || quizOptions?.isGrandTest;
@@ -28,7 +28,7 @@ const QuizInterface = () => {
         setBookmarkedQuestions(savedIds.filter(id => quizQuestions.some(q => q.id === id)));
       }
     };
-    if (quizQuestions.length > 0) loadBookmarks();
+    if (quizQuestions && quizQuestions.length > 0) loadBookmarks();
   }, [quizQuestions]);
 
   useEffect(() => {
@@ -89,7 +89,30 @@ const QuizInterface = () => {
   const CardStyle = getCardStyle();
   const currentQuestion = quizQuestions[currentQuestionIndex];
 
-  if (!currentQuestion) return <div className="text-center p-8">Loading...</div>;
+  // --- EMERGENCY EXIT IF DATA MISSING ---
+  if (!currentQuestion) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+         <div className="p-4 bg-red-100 dark:bg-red-900/30 rounded-full mb-4 animate-pulse">
+            <AlertTriangle className="w-10 h-10 text-red-500" />
+         </div>
+         <h3 className="text-xl font-bold mb-2 text-slate-800 dark:text-white">Test Data Unavailable</h3>
+         <p className="text-slate-500 mb-6">We couldn't recover the questions for this session.</p>
+         <button 
+           onClick={() => {
+             setIsQuizActive(false);
+             setCurrentView('home');
+             // Force clear potentially corrupt state
+             if (typeof window !== 'undefined') localStorage.setItem('quiz_active', 'false');
+           }} 
+           className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-colors"
+         >
+           Return to Dashboard
+         </button>
+      </div>
+    );
+  }
+
   if (currentView === 'results') return <ResultsView />;
 
   const userAnswer = answers[currentQuestion.id];
@@ -101,7 +124,7 @@ const QuizInterface = () => {
       <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-4 md:space-y-6">
         
         {/* Header */}
-        <div className={`${CardStyle.bg} ${CardStyle.border} p-3 md:p-4 rounded-2xl shadow-lg flex justify-between items-center sticky top-0 z-50`}>
+        <div className={`${CardStyle.bg} ${CardStyle.border} p-3 md:p-4 rounded-2xl shadow-lg flex justify-between items-center sticky top-0 z-40`}>
           <div className="flex items-center gap-3">
             {isTimed && <div className="flex items-center gap-2 px-3 py-1 md:px-4 md:py-2 rounded-xl font-mono font-bold text-lg bg-blue-50 text-blue-600"><Clock className="w-4 h-4" /><span>{formatTime(timeLeftSeconds)}</span></div>}
             {isStrictTiming && <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-1 rounded border border-orange-200 hidden md:block">STRICT</span>}
@@ -142,7 +165,7 @@ const QuizInterface = () => {
           )}
         </div>
         
-        {/* --- REVIEW SECTION (Updated Logic) --- */}
+        {/* Review Section */}
         {!isQuizActive && (
             <div className="animate-fade-in">
                 {currentQuestion.explanation ? (
@@ -156,11 +179,10 @@ const QuizInterface = () => {
                     </div>
                 ) : (
                     <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border border-yellow-200 dark:border-yellow-800 mb-6 text-center text-yellow-700 dark:text-yellow-300">
-                        <p>No written explanation available for this question.</p>
+                        <p>No written explanation available.</p>
                     </div>
                 )}
 
-                {/* AI Analysis (Always render if incorrect, even if no explanation) */}
                 <ReviewAnalysis
                     question={currentQuestion}
                     userIncorrect={currentQuestion.id && answers[currentQuestion.id] !== correctAnswer}

@@ -11,7 +11,45 @@ export const UIProvider = ({ children }) => {
     return false;
   });
   
-  const [currentView, setCurrentView] = useState('home');
+  // PERSISTENCE + BACK BUTTON SUPPORT
+  const [currentView, setCurrentViewState] = useState(() => {
+     if (typeof window !== 'undefined') {
+       // 1. Check URL Hash (Priority for back button/refresh)
+       const hash = window.location.hash.replace('#', '');
+       if (hash) return hash;
+       // 2. Check Local Storage
+       return localStorage.getItem('medvanshi_current_view') || 'home';
+     }
+     return 'home';
+  });
+
+  // Handle Browser Back/Forward Buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash && hash !== currentView) {
+        setCurrentViewState(hash);
+      } else if (!hash) {
+        setCurrentViewState('home');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentView]);
+
+  // Custom SetView that updates History & Storage
+  const setCurrentView = (view) => {
+    setCurrentViewState(view);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('medvanshi_current_view', view);
+      // Only push if different to avoid duplicate history entries
+      if (window.location.hash.replace('#', '') !== view) {
+        window.history.pushState({ view }, '', `#${view}`);
+      }
+    }
+  };
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);

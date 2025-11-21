@@ -135,8 +135,8 @@ export const updateStreak = async (uid) => {
 export const getMCQOfTheDay = async () => {
   try {
     const qCol = collection(db, 'questions');
-    // Fetch a small random batch to pick from
-    const q = query(qCol, limit(10)); 
+    // Strictly filter for 'EPW Dams' only
+    const q = query(qCol, where('q_source', '==', 'EPW Dams'), limit(20)); 
     const snapshot = await getDocs(q);
     
     if (snapshot.empty) return null;
@@ -471,6 +471,7 @@ export const getClinicalCases = async () => {
 
 export const seedClinicalCase = async () => {
   try {
+    // CORRECTED SEQUENTIAL INDEXING (0 -> 1 -> 2 for success)
     const caseData = {
       title: 'Acute Chest Pain in 55-Year-Old Male',
       source: 'Marrow Clinicals',
@@ -478,12 +479,52 @@ export const seedClinicalCase = async () => {
       difficulty: 'Hard',
       description: 'A 55-year-old male presents to the ER with crushing substernal chest pain.',
       steps: [
-        { title: 'Initial Presentation', prompt: "Patient is sweating, anxious. BP 160/95, HR 102. History of HTN.<br/><br/>**Immediate action?**", action: 'Choose Management', options: [ { label: 'Nitroglycerin & Aspirin', nextStep: 1 }, { label: 'CT Pulmonary Angio', nextStep: 2 }, { label: 'Antacids', nextStep: 3 } ] },
-        { title: 'ECG Findings', prompt: "Pain persists mildy. <br/>**ECG shows ST elevation in II, III, aVF.** <br/><br/>Diagnosis?", action: 'Diagnose', options: [ { label: 'Inferior Wall MI', nextStep: 4 }, { label: 'Anterior Wall MI', nextStep: 3 }, { label: 'Pericarditis', nextStep: 3 } ] },
-        { title: 'Incorrect Path', prompt: "Patient deteriorates. Re-evaluate clinical approach.", action: 'Try Again', options: [ { label: 'Restart Case', nextStep: 0 } ] },
-        { title: 'Wrong Diagnosis', prompt: "ECG leads don't support that. Review lead distribution.", action: 'Re-evaluate', options: [ { label: 'Back to ECG', nextStep: 1 } ] },
-        { title: 'Treatment Plan', prompt: "Correct. Inferior Wall MI. <br/><br/>**Definitive management?**", action: 'Select Treatment', options: [ { label: 'Thrombolysis / PCI', nextStep: 5 }, { label: 'Observation', nextStep: 3 } ] },
-        { title: 'Case Solved', prompt: "Excellent work. Patient stabilized after PCI.", action: 'Complete', options: [ { label: 'Finish Encounter', nextStep: 99 } ] }
+        // Index 0: Start
+        { 
+          title: 'Initial Presentation', 
+          prompt: "Patient is sweating, anxious. BP 160/95, HR 102. History of HTN.<br/><br/>**Immediate action?**", 
+          action: 'Choose Management', 
+          options: [ 
+            { label: 'Nitroglycerin & Aspirin (Correct)', nextStep: 1 }, // Go to Index 1
+            { label: 'CT Pulmonary Angio (Wrong)', nextStep: 3 }, // Go to Index 3 (Branch)
+            { label: 'Antacids (Wrong)', nextStep: 4 } // Go to Index 4
+          ] 
+        },
+        // Index 1: Correct Path Step 2
+        { 
+          title: 'ECG Findings', 
+          prompt: "Pain persists mildy. <br/>**ECG shows ST elevation in II, III, aVF.** <br/><br/>Diagnosis?", 
+          action: 'Diagnose', 
+          options: [ 
+            { label: 'Inferior Wall MI (Correct)', nextStep: 2 }, // Go to Index 2
+            { label: 'Anterior Wall MI (Wrong)', nextStep: 4 }, 
+            { label: 'Pericarditis (Wrong)', nextStep: 4 } 
+          ] 
+        },
+        // Index 2: Correct Path Step 3
+        { 
+          title: 'Treatment Plan', 
+          prompt: "Correct. Inferior Wall MI. <br/><br/>**Definitive management?**", 
+          action: 'Select Treatment', 
+          options: [ 
+            { label: 'Thrombolysis / PCI (Correct)', nextStep: 100 }, // Success
+            { label: 'Observation (Wrong)', nextStep: 99 } // Fail
+          ] 
+        },
+        // Index 3: Wrong Path A
+        { 
+          title: 'Incorrect Path', 
+          prompt: "Patient deteriorates. Re-evaluate clinical approach.", 
+          action: 'Try Again', 
+          options: [ { label: 'Restart Case', nextStep: 0 } ] 
+        },
+        // Index 4: Wrong Path B
+        { 
+          title: 'Wrong Diagnosis', 
+          prompt: "ECG leads don't support that. Review lead distribution.", 
+          action: 'Re-evaluate', 
+          options: [ { label: 'Back to ECG', nextStep: 1 } ] 
+        }
       ]
     };
     await addDoc(collection(db, 'clinical_cases'), caseData);
@@ -493,7 +534,29 @@ export const seedClinicalCase = async () => {
 
 export const generateAICase = async (topic) => {
   try {
-    const systemPrompt = `You are a medical educator. Create a clinical case on "${topic}". Output VALID JSON: {"title": "Case Title", "source": "AI Simulation", "subject": "${topic}", "difficulty": "Hard", "description": "Summary", "steps": [{"title": "Step 1", "prompt": "Scenario details...", "action": "Decision", "options": [ { "label": "Correct Option", "nextStep": 1 }, { "label": "Wrong Option", "nextStep": 99 } ] }] }. IMPORTANT: Use "nextStep": 99 for fail, 100 for success.`;
+    // UPDATED PROMPT: Strict JSON keys to ensure "prompt" is always present
+    const systemPrompt = `You are a medical educator. Create a clinical case on "${topic}". 
+    Output VALID JSON. Structure:
+    {
+      "title": "Case Title", 
+      "source": "AI Simulation", 
+      "subject": "${topic}", 
+      "description": "Brief summary", 
+      "steps": [
+        {
+          "title": "Step Title (e.g. Initial Presentation)",
+          "prompt": "HTML formatted scenario text. Describe patient vitals, symptoms, etc.",
+          "action": "Short label for decision button (e.g. Choose Diagnosis)",
+          "options": [ { "label": "Option A", "nextStep": 1 } ]
+        }
+      ]
+    }
+    
+    CRITICAL RULES:
+    1. Every step MUST have a "prompt" field. Do NOT use "description" or "text".
+    2. The correct path MUST be sequential indices: Index 0 -> Index 1 -> Index 2 -> 100.
+    3. Use "nextStep": 99 for failure, 100 for success.`;
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${import.meta.env.VITE_GROQ_API_KEY}`, 'Content-Type': 'application/json', },
@@ -505,7 +568,19 @@ export const generateAICase = async (topic) => {
     });
     if (!response.ok) throw new Error("AI API Error");
     const data = await response.json();
-    return JSON.parse(data.choices[0].message.content);
+    let parsedData = JSON.parse(data.choices[0].message.content);
+
+    // DATA SANITIZATION: Ensure every step has a 'prompt'
+    if(parsedData.steps && Array.isArray(parsedData.steps)){
+        parsedData.steps = parsedData.steps.map(step => ({
+            ...step,
+            // Fallback: If AI put prompt in 'description' or 'text', use that.
+            prompt: step.prompt || step.description || step.text || "Scenario details missing.",
+            action: step.action || "Make Decision"
+        }));
+    }
+
+    return parsedData;
   } catch (error) {
     console.error("Error generating AI case:", error);
     return null;

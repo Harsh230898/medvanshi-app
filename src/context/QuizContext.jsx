@@ -11,22 +11,63 @@ export const QuizProvider = ({ children }) => {
   const uiContext = useContext(UIContext);
   const notificationContext = useContext(NotificationContext);
   
-  const [isQuizActive, setIsQuizActive] = useState(false);
-  const [quizQuestions, setQuizQuestions] = useState([]); 
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
-  const [markings, setMarkings] = useState({});
-  
-  // Timer State
-  const [timeLeftSeconds, setTimeLeftSeconds] = useState(0);
-  const [initialTimeSeconds, setInitialTimeSeconds] = useState(0); // NEW: To calc time spent
+  // Helper to load state safely from LocalStorage
+  const loadState = (key, def) => {
+    if (typeof window === 'undefined') return def;
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : def;
+    } catch (e) {
+      return def;
+    }
+  };
+
+  const [isQuizActive, setIsQuizActive] = useState(() => loadState('quiz_active', false));
+  const [quizQuestions, setQuizQuestions] = useState(() => loadState('quiz_questions', []));
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(() => loadState('quiz_index', 0));
+  const [answers, setAnswers] = useState(() => loadState('quiz_answers', {}));
+  const [markings, setMarkings] = useState(() => loadState('quiz_markings', {}));
+  const [timeLeftSeconds, setTimeLeftSeconds] = useState(() => loadState('quiz_timer', 0));
+  const [initialTimeSeconds, setInitialTimeSeconds] = useState(() => loadState('quiz_initial_time', 0));
+  const [quizOptions, setQuizOptions] = useState(() => loadState('quiz_options', {}));
   
   const [savedQuizSession, setSavedQuizSession] = useState(null);
-  const [quizOptions, setQuizOptions] = useState({}); // Store title/source
+  const [showImageQuestions, setShowImageQuestions] = useState(true); // Image Toggle
+
+  // --- PERSISTENCE EFFECT ---
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('quiz_active', JSON.stringify(isQuizActive));
+      localStorage.setItem('quiz_questions', JSON.stringify(quizQuestions));
+      localStorage.setItem('quiz_index', JSON.stringify(currentQuestionIndex));
+      localStorage.setItem('quiz_answers', JSON.stringify(answers));
+      localStorage.setItem('quiz_markings', JSON.stringify(markings));
+      localStorage.setItem('quiz_timer', JSON.stringify(timeLeftSeconds));
+      localStorage.setItem('quiz_initial_time', JSON.stringify(initialTimeSeconds));
+      localStorage.setItem('quiz_options', JSON.stringify(quizOptions));
+    }
+  }, [isQuizActive, quizQuestions, currentQuestionIndex, answers, markings, timeLeftSeconds, quizOptions]);
+
+  // --- SAFETY CHECK (Fix Loading Loop) ---
+  useEffect(() => {
+    // If app thinks quiz is active but data is empty/corrupt, RESET it.
+    if (isQuizActive && (!quizQuestions || quizQuestions.length === 0)) {
+      console.warn("Quiz state corrupted (Active but no questions). Resetting...");
+      setIsQuizActive(false);
+      setSavedQuizSession(null);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('quiz_active', 'false');
+        localStorage.removeItem('quiz_questions');
+      }
+    }
+  }, [isQuizActive, quizQuestions]);
 
   const submitQuiz = useCallback(() => {
     setIsQuizActive(false);
     setSavedQuizSession(null);
+    if (typeof window !== 'undefined') {
+        localStorage.setItem('quiz_active', 'false');
+    }
     uiContext?.setCurrentView('results');
     notificationContext?.addNotification("Test submitted successfully!", 'success');
   }, [uiContext, notificationContext]);
@@ -38,7 +79,7 @@ export const QuizProvider = ({ children }) => {
         setTimeLeftSeconds(prevTime => prevTime - 1);
       }, 1000);
     } else if (timeLeftSeconds === 0 && isQuizActive) {
-      notificationContext?.addNotification("Time's up! Submitting your test...", 'info');
+      notificationContext?.addNotification("Time's up! Submitting...", 'info');
       submitQuiz();
     }
     return () => clearInterval(timerId);
@@ -52,35 +93,43 @@ export const QuizProvider = ({ children }) => {
 
     uiContext?.setIsGlobalLoading(true); 
     try {
-      const questions = await getQuestions(filters);
+      let questions = await getQuestions(filters);
+
+      // LOGIC: Remove images if toggle is FALSE
+      if (!showImageQuestions) {
+         questions = questions.filter(q => !q.questionImage);
+      }
 
       if (questions.length === 0) {
-        notificationContext?.addNotification("No questions found for your filters.", 'error');
+        notificationContext?.addNotification("No questions found. Try enabling images or changing filters.", 'error');
         return;
+      }
+
+      if (questions.length > filters.count) {
+          questions = questions.slice(0, filters.count);
       }
 
       setQuizQuestions(questions);
       setAnswers({});
       setMarkings(questions.reduce((acc, q) => ({ ...acc, [q.id]: 0 }), {}));
       setCurrentQuestionIndex(0);
-      setQuizOptions(filters); // Save options for ResultsView
+      setQuizOptions(filters);
       
       const isGrandTest = filters.isGrandTest || false;
-      // Default time or Custom time passed in filters
       let totalTime = filters.timer 
         ? filters.timer 
         : (isGrandTest ? TOTAL_TEST_MINUTES * 60 : questions.length * TIME_PER_QUESTION_SECONDS);
       
       setTimeLeftSeconds(totalTime);
-      setInitialTimeSeconds(totalTime); // NEW
+      setInitialTimeSeconds(totalTime);
       
       uiContext?.setCurrentView('quiz');
       setIsQuizActive(true);
-      notificationContext?.addNotification(`Test started (${questions.length} Qs). Good luck!`, 'success');
+      notificationContext?.addNotification(`Test started (${questions.length} Qs).`, 'success');
       
     } catch (error) {
       console.error("Failed to start quiz:", error);
-      notificationContext?.addNotification("Error loading questions. Check filters or connection.", 'error');
+      notificationContext?.addNotification("Error loading questions. Check connection.", 'error');
     } finally {
       uiContext?.setIsGlobalLoading(false); 
     }
@@ -93,28 +142,16 @@ export const QuizProvider = ({ children }) => {
     setMarkings(savedQuizSession.markings);
     setCurrentQuestionIndex(savedQuizSession.currentQuestionIndex);
     setTimeLeftSeconds(savedQuizSession.timeLeftSeconds);
-    setInitialTimeSeconds(savedQuizSession.initialTimeSeconds || 3600); // Fallback
+    setInitialTimeSeconds(savedQuizSession.initialTimeSeconds || 3600);
     setQuizOptions(savedQuizSession.quizOptions || {});
     setSavedQuizSession(null); 
-    
     uiContext?.setCurrentView('quiz');
     setIsQuizActive(true);
-    notificationContext?.addNotification("Test resumed.", 'info');
   };
 
   const pauseQuizAndSave = () => {
     if (!isQuizActive) return;
-    const session = {
-        quizQuestions,
-        answers,
-        markings,
-        currentQuestionIndex,
-        timeLeftSeconds,
-        initialTimeSeconds,
-        quizOptions,
-        timestamp: Date.now(),
-    };
-    setSavedQuizSession(session);
+    setSavedQuizSession({ quizQuestions, answers, markings, currentQuestionIndex, timeLeftSeconds, initialTimeSeconds, quizOptions, timestamp: Date.now() });
     setIsQuizActive(false);
     uiContext?.setCurrentView('home'); 
     notificationContext?.addNotification("Test paused and saved.", 'info');
@@ -126,36 +163,15 @@ export const QuizProvider = ({ children }) => {
       const userChoice = answers[q.id];
       if (userChoice !== undefined) {
         attempted++;
-        if (userChoice + 1 === q.answer) {
-          correct++;
-          score += 4;
-        } else {
-          incorrect++;
-          score -= 1;
-        }
+        if (userChoice + 1 === q.answer) { correct++; score += 4; } else { incorrect++; score -= 1; }
       }
     });
-    
-    // NEW: Calculate Time Spent
-    const timeSpentSeconds = initialTimeSeconds - timeLeftSeconds;
-    
-    return { 
-        score, 
-        totalQuestions: quizQuestions.length, 
-        attempted, 
-        correct, 
-        incorrect,
-        timeSpentSeconds // Return time
-    };
+    return { score, totalQuestions: quizQuestions.length, attempted, correct, incorrect, timeSpentSeconds: initialTimeSeconds - timeLeftSeconds };
   };
 
-  const formatTime = (totalSeconds) => {
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    const pad = (num) => String(num).padStart(2, '0');
-    if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-    return `${pad(minutes)}:${pad(seconds)}`;
+  const formatTime = (s) => {
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    return h>0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
   };
 
   return (
@@ -166,9 +182,10 @@ export const QuizProvider = ({ children }) => {
       answers, setAnswers,
       markings, setMarkings,
       timeLeftSeconds, setTimeLeftSeconds,
-      initialTimeSeconds, // Exported
+      initialTimeSeconds,
       savedQuizSession, setSavedQuizSession,
-      quizOptions, // Exported
+      quizOptions,
+      showImageQuestions, setShowImageQuestions,
       startQuiz, resumeQuiz, pauseQuizAndSave, submitQuiz,
       calculateResults, formatTime
     }}>

@@ -1,6 +1,6 @@
 // src/views/PatientEncountersView.jsx
 import React, { useContext, useState, useEffect } from 'react';
-import { UserCheck, Maximize2, Layers, Loader2, PlusCircle, Play, ArrowLeft, Brain, Sparkles, AlertTriangle, RefreshCcw } from 'lucide-react';
+import { UserCheck, Maximize2, Layers, Loader2, Play, ArrowLeft, Brain, Sparkles, AlertTriangle, CheckCircle, XCircle, Home } from 'lucide-react';
 import UIContext from '../context/UIContext';
 import PatientEncounterContext from '../context/PatientEncounterContext';
 import { seedClinicalCase } from '../services/firestoreService';
@@ -12,17 +12,13 @@ const PatientEncountersView = () => {
     availableCases = [], 
     casesLoading, refreshCases,
     startEncounter, handleCaseAction,
-    isGenerating, generateCase 
+    isGenerating, generateCase,
+    encounterOutcome, endEncounter 
   } = useContext(PatientEncounterContext);
   const CardStyle = getCardStyle();
   
   const [customTopic, setCustomTopic] = useState('');
   const [isSeeding, setIsSeeding] = useState(false);
-  const [renderError, setRenderError] = useState(null);
-
-  useEffect(() => {
-    setRenderError(null);
-  }, [activeCase]);
 
   const QUICK_TOPICS = ["Myocardial Infarction", "Stroke", "DKA", "Trauma", "Pneumonia"];
 
@@ -47,12 +43,54 @@ const PatientEncountersView = () => {
     setIsSeeding(false);
   };
 
+  // --- 1. OUTCOME REPORT (Replaces the Alert) ---
+  if (encounterOutcome) {
+    const isSuccess = encounterOutcome === 'success';
+    return (
+      <div className="max-w-3xl mx-auto p-6 flex flex-col items-center justify-center min-h-[60vh]">
+        <div className={`p-8 rounded-3xl shadow-2xl text-center w-full border-2 ${isSuccess ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800' : 'bg-rose-50 border-rose-200 dark:bg-rose-900/20 dark:border-rose-800'}`}>
+           <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-6 ${isSuccess ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+              {isSuccess ? <CheckCircle className="w-10 h-10" /> : <XCircle className="w-10 h-10" />}
+           </div>
+           
+           <h2 className={`text-3xl font-black mb-2 ${isSuccess ? 'text-emerald-800 dark:text-emerald-300' : 'text-rose-800 dark:text-rose-300'}`}>
+             {isSuccess ? "Clinical Management Successful" : "Patient Outcome Suboptimal"}
+           </h2>
+           <p className="text-slate-600 dark:text-slate-400 font-medium mb-8">
+             {isSuccess ? "You stabilized the patient effectively." : "Review your approach and try again."}
+           </p>
+
+           <div className="text-left bg-white/60 dark:bg-black/20 rounded-xl p-6 mb-8 max-h-60 overflow-y-auto custom-scrollbar">
+              <h3 className="text-sm font-bold uppercase text-slate-500 mb-4 flex items-center gap-2"><Layers className="w-4 h-4"/> Case Decision Log</h3>
+              <div className="space-y-3">
+                {caseHistory.map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-3 text-sm">
+                    <span className="font-mono text-slate-400 font-bold">{idx + 1}.</span>
+                    <div>
+                      <p className="font-bold text-slate-700 dark:text-slate-300">{item.step}</p>
+                      <p className={`font-medium ${isSuccess ? 'text-emerald-600' : 'text-slate-600'}`}>Selected: {item.actionTaken}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+           </div>
+
+           <button 
+             onClick={endEncounter}
+             className={`px-8 py-4 rounded-xl font-bold text-white shadow-lg hover:scale-105 transition-all flex items-center gap-2 mx-auto ${isSuccess ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-rose-500 hover:bg-rose-600'}`}
+           >
+             <Home className="w-5 h-5" /> Return to Dashboard
+           </button>
+        </div>
+      </div>
+    );
+  }
+
   const isValidCase = activeCase && activeCase.steps && Array.isArray(activeCase.steps) && activeCase.steps.length > 0;
   
-  // --- 1. DASHBOARD VIEW ---
+  // --- 2. DASHBOARD VIEW ---
   if (!activeCase || !isValidCase) {
     return (
-      // FIX: Removed h-full and overflow-y-auto to allow normal page scrolling
       <div className="max-w-7xl mx-auto">
         <div className="mb-10">
           <h2 className={`text-4xl lg:text-6xl font-black mb-3 ${getTextColor('text-slate-900', 'text-white')}`}>
@@ -146,7 +184,7 @@ const PatientEncountersView = () => {
     );
   }
   
-  // --- 2. ACTIVE ENCOUNTER VIEW ---
+  // --- 3. ACTIVE ENCOUNTER VIEW ---
   const stepData = activeCase.steps[currentStep] || activeCase.steps[0];
 
   if (!stepData) {
@@ -155,7 +193,7 @@ const PatientEncountersView = () => {
            <AlertTriangle className="w-16 h-16 text-red-500 mb-4" />
            <h2 className="text-3xl font-black text-slate-800 dark:text-white mb-2">Simulation Error</h2>
            <p className="text-slate-500 mb-6">Simulation step data missing.</p>
-           <button onClick={() => handleCaseAction('End', 99)} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold">
+           <button onClick={() => endEncounter()} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold">
              Return to Dashboard
            </button>
         </div>
@@ -163,7 +201,6 @@ const PatientEncountersView = () => {
   }
 
   return (
-    // FIX: Removed h-full and fixed layout to allow scrolling
     <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
       
       {/* Scenario Panel */}
@@ -174,7 +211,7 @@ const PatientEncountersView = () => {
               <h3 className="text-xs font-bold text-purple-500 uppercase mb-1">{activeCase.source}</h3>
               <h2 className={`text-2xl font-black ${CardStyle.text}`}>{activeCase.title}</h2>
             </div>
-            <button onClick={() => handleCaseAction('Exit', 99)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full">
+            <button onClick={() => endEncounter()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full">
               <ArrowLeft className="w-6 h-6 text-slate-500" />
             </button>
           </div>

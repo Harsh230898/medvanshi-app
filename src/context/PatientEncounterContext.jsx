@@ -11,6 +11,9 @@ export const PatientEncounterProvider = ({ children }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [caseHistory, setCaseHistory] = useState([]);
   
+  // NEW: Track the outcome ('success' | 'failure' | null)
+  const [encounterOutcome, setEncounterOutcome] = useState(null);
+  
   const [availableCases, setAvailableCases] = useState([]);
   const [casesLoading, setCasesLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -30,23 +33,28 @@ export const PatientEncounterProvider = ({ children }) => {
     fetchCases();
   }, []);
 
-  // --- SAFETY UPDATE START ---
   const startEncounter = (caseData) => {
-    // Check if caseData exists and has steps
     if (!caseData || !caseData.steps || !Array.isArray(caseData.steps) || caseData.steps.length === 0) {
-      alert("Error: This case data is incomplete. Please try another case.");
+      // Fallback alert only for data errors
+      console.warn("Case data incomplete.");
       return;
     }
-
     setActiveCase(caseData);
     setCurrentStep(0);
     setCaseHistory([]);
+    setEncounterOutcome(null); // Reset outcome
     
     if (uiContext) {
       uiContext.setCurrentView('patient-encounters');
     }
   };
-  // --- SAFETY UPDATE END ---
+
+  const endEncounter = () => {
+    setActiveCase(null);
+    setEncounterOutcome(null);
+    setCaseHistory([]);
+    if (uiContext) uiContext.setCurrentView('home');
+  };
 
   const generateCase = async (topic) => {
     setIsGenerating(true);
@@ -55,11 +63,10 @@ export const PatientEncounterProvider = ({ children }) => {
       if (newCase && newCase.steps && newCase.steps.length > 0) {
          startEncounter(newCase);
       } else {
-         alert("AI failed to generate a valid case. Please try again.");
+         console.warn("AI failed to generate a valid case.");
       }
     } catch (error) {
       console.error("Generation failed:", error);
-      alert("Could not generate case. Check connection.");
     } finally {
       setIsGenerating(false);
     }
@@ -69,21 +76,22 @@ export const PatientEncounterProvider = ({ children }) => {
     if (!activeCase || !activeCase.steps) return;
     
     const currentStepData = activeCase.steps[currentStep];
+    
+    // 1. Log History
     if (currentStepData) {
-      setCaseHistory(prev => [...prev, { step: currentStepData.title || "Step", actionTaken: label }]);
+      setCaseHistory(prev => [...prev, { step: currentStepData.title || `Step ${currentStep + 1}`, actionTaken: label }]);
     }
 
+    // 2. Check for End State (99 = Fail, 100 = Success)
     if (nextStep >= 99) {
-      alert(nextStep === 100 ? "Case Completed Successfully!" : "Simulation Ended.");
-      setActiveCase(null);
-      if (uiContext) uiContext.setCurrentView('home');
+        setEncounterOutcome(nextStep === 100 ? 'success' : 'failure');
     } else {
+      // 3. Navigate to Next Step
       if (activeCase.steps[nextStep]) {
         setCurrentStep(nextStep);
       } else {
-        console.warn("Next step not found. Ending simulation.");
-        setActiveCase(null);
-        if (uiContext) uiContext.setCurrentView('home');
+        console.warn(`Step ${nextStep} missing. Ending simulation.`);
+        setEncounterOutcome('success'); // Default to success if path ends
       }
     }
   };
@@ -105,7 +113,8 @@ export const PatientEncounterProvider = ({ children }) => {
       activeCase, currentStep, caseHistory, 
       availableCases, casesLoading, refreshCases,
       isGenerating, generateCase, 
-      startEncounter, handleCaseAction 
+      startEncounter, handleCaseAction, 
+      encounterOutcome, endEncounter // Exported
     }}>
       {children}
     </PatientEncounterContext.Provider>

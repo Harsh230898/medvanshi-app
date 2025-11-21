@@ -50,18 +50,22 @@ const App = () => {
   const { communityMnemonics } = useContext(UGCContext);
   const { allSubjects, metadataLoading } = useContext(MetadataContext);
 
-  // --- SPLASH SCREEN TIMER ---
+  // --- SAFETY TIMER FOR SPLASH SCREEN ---
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!metadataLoading) {
-        setIsAppLoading(false);
-      }
-    }, 5000); 
-    return () => clearTimeout(timer);
+    // 1. If metadata loads, stop loading
+    if (!metadataLoading) {
+      setIsAppLoading(false);
+    }
+
+    // 2. Failsafe: Force stop loading after 4 seconds even if metadata is stuck
+    const safetyTimer = setTimeout(() => {
+      setIsAppLoading(false);
+    }, 4000);
+
+    return () => clearTimeout(safetyTimer);
   }, [metadataLoading, setIsAppLoading]);
 
   // --- FULL SCREEN VIEW CONFIGURATION ---
-  // FIX: Removed 'patient-encounters' so Top Bar stays visible
   const isFullScreenView = isQuizActive || 
                            currentView === 'quiz' || 
                            currentView === 'results' || 
